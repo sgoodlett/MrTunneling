@@ -1,9 +1,11 @@
 import pathlib
 import numpy as np
+from collections.abc import Callable
+from qcelemental.models.molecule import Molecule
 from .constants import au_to_amu, ref_mass
 
 class Bead():
-    def __init__(self, mol):
+    def __init__(self, mol:Molecule) -> None:
         """
             mol: QCElemental molecule, structures are currently always assuming
                 Cartesian coordinates
@@ -35,7 +37,7 @@ class Bead():
         self.M    = np.diag(np.sqrt(self.masses / ref_mass))
         self.Minv = np.diag(np.sqrt(self.masses / ref_mass)**-1)
 
-    def __str__(self):
+    def __str__(self) -> str:
         s = self._mol.to_string("xyz").splitlines()
         # Put energy in comment line
         if self.has_V:
@@ -45,19 +47,19 @@ class Bead():
         s = "\n".join(s)
         return s
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._mol.geometry.flatten())
 
     @property
-    def x(self):
+    def x(self) -> np.ndarray:
         #return self.M @ self.mol.geometry.flatten()
         return self.mol.geometry.flatten()
 
     @property
-    def mol(self):
+    def mol(self) -> Molecule:
         return self._mol
 
-    def update(self, newmol_geom):
+    def update(self, newmol_geom:np.ndarray) -> None:
         # Modify the coordiantes of the bead molecule, clear all known values
         #   and set to the new "old" values
         # Probably shouldn't update beads if nothing has been done
@@ -70,37 +72,37 @@ class Bead():
         self.mol = newmol_geom
 
     @mol.setter
-    def mol(self, newmol_geom):
+    def mol(self, newmol_geom:np.ndarray) -> None:
         self._mol = self._mol.copy(update={"geometry": newmol_geom})
         self.has_V = False
         self.has_grad = False
         self.has_hess = False
 
     @property
-    def has_data(self):
+    def has_data(self) -> bool:
         return self.has_V or self.has_grad or self.has_hess
 
     @property
-    def energy(self):
+    def energy(self) -> float:
         if self.has_V:
             return self._V
         else:
             raise AttributeError("No energy for structure!")
 
     @energy.setter
-    def energy(self, energy_fxn):
+    def energy(self, energy_fxn:Callable[[Molecule],float]) -> None:
         self._V = energy_fxn(self.mol)
         self.has_V = True
 
     @property
-    def gradient(self):
+    def gradient(self) -> np.ndarray:
         if self.has_grad:
             return self._grad
         else:
             raise AttributeError("No gradient for structure!")
 
     @gradient.setter
-    def gradient(self, grad_fxn):
+    def gradient(self, grad_fxn:Callable[[Molecule],np.ndarray]) -> None:
         g = grad_fxn(self.mol)
         if len(g.flatten()) != len(self):
             raise ValueError("Computed gradient length does not match Bead molecule.")
@@ -110,14 +112,14 @@ class Bead():
         self.has_grad = True
 
     @property
-    def hessian(self):
+    def hessian(self) -> np.ndarray:
         if self.has_hess:
             return self._hess
         else:
             raise AttributeError("No Hessian for structure!")
 
     @hessian.setter
-    def hessian(self, hess_fxn):
+    def hessian(self, hess_fxn:Callable[[Molecule],np.ndarray]) -> None:
         h = hess_fxn(self.mol)
         if h.shape[0] != len(self) or h.shape[1] != len(self):
             raise ValueError("Computed Hessian length does not match Bead molecule.")
@@ -139,7 +141,7 @@ class Bead():
     #    return Bkp1
     
     # Bofill as used in Optking
-    def update_hessian(self, mol):
+    def update_hessian(self, mol:Molecule) -> np.ndarray:
         """
             Hessian update scheme, using previous Hessian, old gradient, 
                 and new gradient.
@@ -168,7 +170,7 @@ class Bead():
         H_new = H + phi * Powell + (1.0 - phi) * MS
         return H_new
 
-    def write(self, dir, idx):
+    def write(self, dir:str, idx:int) -> None:
         # Save bead and relevant attributes to files in dir
         root = f"bead_{idx}"
         with open(dir / f"{root}.mol", "w") as f:

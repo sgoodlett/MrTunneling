@@ -1,22 +1,28 @@
 import numpy as np
-
 from .constants import kb
+from .bead import Bead
+from .ring_polymer import RingPolymer
 
-class FakeRingPolymer():
-    def __init__(self, refRingPolymer, bead):
+class FakeRingPolymer(RingPolymer):
+    def __init__(self, refRingPolymer:RingPolymer, bead:Bead) -> None:
         self.beads = [bead] # Bead 1 to N/2, indexed minus 1 bc Python
         self.N = len(refRingPolymer.beads) * 2
         self.T = refRingPolymer.T
         self.beta = (kb*self.T)**-1
         self.betaN = self.beta / self.N
 
-    def com(self):
+    def update_beadN(self, N:int) -> None:
+        # Update N to match N of another RP
+        self.N = N 
+        self.betaN = self.beta / self.N
+
+    def com(self) -> np.ndarray:
         out = np.zeros(3)
         bead = self.beads[0]
         out += np.sum(np.diag(bead.mol.masses) @ bead.mol.geometry, axis=0)
         return out / (self.N * np.sum(self.beads[0].mol.masses))
 
-    def moit(self):
+    def moit(self) -> np.ndarray:
         c = self.com()
         I = np.zeros((3,3))
         bead = self.beads[0]

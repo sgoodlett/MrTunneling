@@ -1,13 +1,16 @@
+from __future__ import annotations
 import pathlib
 import numpy as np
 from copy import deepcopy
 import re
 import scipy
 import qcelemental as qcel
+from qcelemental.models.molecule import Molecule
 from .constants import hbar, h2cm, kb, au_to_amu, ref_mass
 from .utils import proc_Hess
-from .ring_polymer import RingPolymer
+from .task_driver import TaskDriver
 from .bead import Bead
+from .ring_polymer import RingPolymer
 #from .partition_functions import trans_pfxn, rot_pfxn, vib_pfxn_R, vib_pfxn_inst
 
 class Instanton(RingPolymer):
@@ -29,26 +32,29 @@ class Instanton(RingPolymer):
         "tr_good_step_upper": 1.75
     }
 
-    def __init__(self, wb, T, beads, task_driver, restart_at=0, align=False):
+    def __init__(self, wb:float, T:float, beads:list[Bead], 
+                 task_driver:TaskDriver, restart_at=0, align=False) -> None:
         self.wb = wb
-        self.rate_convergence = 1e-2
+        #self.rate_convergence = 1e-2
         self.restart_at = restart_at
         self.working_dir = pathlib.Path.cwd()
         super().__init__(T, beads, task_driver)
         if align:
             self.align_beads()
 
-    def crossover_T(self):
+    def crossover_T(self) -> float:
         # Crossover temperature, don't run instantons above this temperature
         return hbar * np.abs(self.wb) / (2*np.pi*kb)
 
-    def optimize(self, opt_plan):
+    def optimize(self, opt_plan:dict, save_dir_prefix="") -> int:
+        self.old_Hevals = None
+        self.old_Hevecs = None
         self.read_opt_plan(opt_plan)
         # Compute exact Hessian for first step
         self.evaluate_all_beads(der_lvl=2)
-        self.save_state(f"step_{self.restart_at}")
+        self.save_state(save_dir_prefix + f"step_{self.restart_at}")
         for iter in range(1,self.max_iter):
-            print(f"Step {iter+self.restart_at}")
+            print(f"\tStep {iter+self.restart_at}")
             # Calculate step
             if self.opt_method == "nr":
                 step = self.take_step_NR()
@@ -58,7 +64,12 @@ class Instanton(RingPolymer):
                 if np.max(np.abs(step)) > self.step_limit:
                     step *= self.step_limit / np.max(np.abs(step))
             elif self.opt_method == "evf":
-                step = self.take_step_EF()
+                good, step = self.take_step_EF()
+                if not good:
+                    self.evaluate_all_beads(der_lvl=2)
+                    good, step = self.take_step_EF()
+                    if not good:
+                        print("FOOK")
                 #step = self.Minv() @ h
                 # Scale down step
                 if np.max(np.abs(step)) > self.step_limit:
@@ -81,14 +92,14 @@ class Instanton(RingPolymer):
                 self.evaluate_all_beads(der_lvl=1, update_hess=True)
             
             # Save and check for convergence
-            self.save_state(f"step_{iter+self.restart_at}")
+            self.save_state(save_dir_prefix + f"step_{iter+self.restart_at}")
             converged = self.check_convergence(step, self.gradient())
             if converged:
                 print("Done")
                 return 0
         raise Exception("Max number of iterations reached without convergence!")
 
-    def read_opt_plan(self, opt_plan):
+    def read_opt_plan(self, opt_plan:dict) -> None:
         # Get relevant optimization settings
         new_opt_plan = self._default_opt_plan.copy()
         invalid = set(opt_plan.keys()) - set(self._default_opt_plan.keys())
@@ -99,13 +110,18 @@ class Instanton(RingPolymer):
         # Set as attributes
         for key, value in new_opt_plan.items():
             setattr(self, key, value)
-            print(eval(f"self.{key}"))
+            kval = eval(f"self.{key}")
+            if type(kval) is float:
+                print(f"\t{key:20s} = {kval:5.2e}")
+            elif type(kval) is str:
+                print(f"\t{key:20s} = {kval:8s}")
+        print("\n")
         if self.hess_every < 1:
             self.do_exact_hess_updates = False
         else:
             self.do_exact_hess_updates = True
 
-    def take_step_NR(self):
+    def take_step_NR(self) -> np.ndarray:
         # Newton-Raphson
         # Assume n, and n,n for grad and hess shapes
         g = self.gradient()
@@ -115,10 +131,27 @@ class Instanton(RingPolymer):
         h = -1.0 * np.linalg.pinv(H, hermitian=True) @ g
         return h
 
-    def take_step_EF(self):
+    def take_step_EF(self) -> np.ndarray:
         g = self.gradient()
         H = self.hessian()
         Heval, Hevec = np.linalg.eigh(H)
+
+        # Check H
+        if self.old_Hevals is None or self.old_Hevecs is None:
+            pass
+        else:
+            if np.isclose(self.old_Hevals[1], 0, atol=1e-5) and Heval[1] < -1:
+                print("Oh shit, evals exploded")
+                return False, None
+            evec_overlap = self.old_Hevecs.T @ Hevec[:,0:2]
+            if np.abs(evec_overlap[0,0]) < 0.8:
+                print("Oh shit, evec changed!")
+                print("\t", evec_overlap)
+
+        # Save the two relevant eigenpairs
+        self.old_Hevals = Heval[0:2]
+        self.old_Hevecs = Hevec[:,0:2]
+
         F = g @ Hevec
         if (Heval[0]/2.0) < Heval[1]:
             alpha = 1.0
@@ -126,13 +159,12 @@ class Instanton(RingPolymer):
         else:
             alpha = (Heval[0] - Heval[1]) / Heval[1]
             labda = (Heval[0] + 3*Heval[1]) / 4.0
-        print(f"lamda = {labda:5.2e}, h_1 = {Heval[0]:5.2e}, h_2 = {Heval[1]:5.2e}")
+        print(f"\tlambda = {labda:5.2e}, h_1 = {Heval[0]:5.2e}, h_2 = {Heval[1]:5.2e}")
         xi = alpha * F / (labda - Heval)
         h = xi @ Hevec.T
-        print(h.shape)
-        return h
+        return True, h
 
-    def check_convergence(self, step, grad):
+    def check_convergence(self, step:np.ndarray, grad:np.ndarray) -> bool:
         n = self.beads[0].natoms * len(self.beads)
         step_norm = np.linalg.norm(step) / np.sqrt(n)
         grad_norm = np.linalg.norm(grad) / np.sqrt(n)
@@ -142,22 +174,24 @@ class Instanton(RingPolymer):
         rms_grad_chk = grad_norm < self.grad_rms_convergence
         max_step_chk = max_step  < self.step_max_convergence
         max_grad_chk = max_grad  < self.grad_max_convergence
-        print("-----Convergence Check-----")
-        print_these = [["RMS Step size"   , self.step_rms_convergence, rms_step_chk, step_norm], 
-                       ["Max Step size"   , self.step_max_convergence, max_step_chk, max_step], 
-                       ["RMS Grad norm"   , self.grad_rms_convergence, rms_grad_chk, grad_norm], 
-                       ["Max Grad Element", self.grad_max_convergence, max_grad_chk, max_grad]]
+        print("\t-----Convergence Check-----")
+        print_these = [["\tRMS Step size"   , self.step_rms_convergence, rms_step_chk, step_norm], 
+                       ["\tMax Step size"   , self.step_max_convergence, max_step_chk, max_step], 
+                       ["\tRMS Grad norm"   , self.grad_rms_convergence, rms_grad_chk, grad_norm], 
+                       ["\tMax Grad Element", self.grad_max_convergence, max_grad_chk, max_grad]]
         for i in print_these:
             sign = ">" if i[2] else "<"
             print(f"{i[0]:20s}   {i[1]:10.7e} {sign} {i[3]:10.7e}")
-        print("---------------------------")
+        print("\t---------------------------")
         if rms_step_chk and rms_grad_chk and max_step_chk and max_grad_chk:
             return True
         else:
             return False
 
     @classmethod
-    def initiate_from_TS(cls, T, TSmol, TShess, Nbeads, task_driver, delta=0.1):
+    def initiate_from_TS(cls, T:float, TSmol:Molecule, TShess:np.ndarray, 
+                         Nbeads:int, task_driver:TaskDriver,
+                           delta=0.1) -> Instanton:
         """
             Initiate ring polymer from a transition state structure and Hessian
             T: Temperature
@@ -184,7 +218,7 @@ class Instanton(RingPolymer):
         beads = [Bead(g) for g in geoms]
         return cls(freqs[0], T, beads, task_driver, align=True)
 
-    def save_state(self, dirname):
+    def save_state(self, dirname:str) -> None:
         # Save data to directory: dirname
         d = pathlib.Path(dirname)
         d.mkdir(parents=True, exist_ok=True)
@@ -195,13 +229,13 @@ class Instanton(RingPolymer):
             f.write(f"wb:{self.wb}\n")
             f.write(f"T:{self.T}")
 
-    def write_to_mXYZ(self, fn):
+    def write_to_mXYZ(self, fn:str) -> None:
         # Write an XYZ file with all of the beads
         with open(f"{fn}", "w") as f:
             f.write("\n>\n".join([str(i) for i in self.beads]))
     
     @classmethod
-    def read_state(cls, restart_dir):
+    def read_state(cls, restart_dir:str) -> Instanton:
         # Load previous instanton data for restarting
         p = pathlib.Path(restart_dir)
         # Read instanton conditions
@@ -234,15 +268,16 @@ class Instanton(RingPolymer):
         return cls(wb, T, beads, None)
 
     @classmethod
-    def restart(cls, restart_dir, task_driver, temp=None):
+    def restart(cls, restart_dir:str, task_driver:TaskDriver, temp=None, 
+                restart_at=0) -> Instanton:
         # Set up instanton for restarting
-        ra = int(restart_dir.strip("step_")) + 1
+        #ra = int(restart_dir.strip("step_")) + 1
         # NEW
         c = cls.read_state(restart_dir)
         if temp is not None:
             c.T = temp
         c.task_driver = task_driver
-        c.restart_at = ra
+        c.restart_at = restart_at
         return c
 
         #p = pathlib.Path(restart_dir)

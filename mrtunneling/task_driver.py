@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+import numpy as np
+from qcelemental.models.molecule import Molecule
 
 class TaskDriver(ABC):
     def __init__(self):
@@ -12,15 +14,15 @@ class TaskDriver(ABC):
     """
 
     @abstractmethod
-    def energy(self, mol):
+    def energy(self, mol:Molecule) -> float:
         pass
     
     @abstractmethod
-    def gradient(self, mol):
+    def gradient(self, mol:Molecule) -> np.ndarray:
         pass
     
     @abstractmethod
-    def hessian(self, mol):
+    def hessian(self, mol:Molecule) -> np.ndarray:
         pass
     
 

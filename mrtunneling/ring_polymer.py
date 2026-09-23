@@ -10,7 +10,7 @@ class RingPolymer():
         Potential, gradient, and Hessian of the Ring Polymer are defined
         with respect to the beads and the fictitious spring forces.
     """
-    def __init__(self, T, beads, task_driver:TaskDriver):
+    def __init__(self, T:float, beads:list[Bead], task_driver:TaskDriver) -> None:
         """
             beads: list of half ring polymer mrtunneling.bead.Bead
             N: number of beads for full ring polymer
@@ -27,15 +27,15 @@ class RingPolymer():
         #self.exact_hessian = False
         self.task_driver = task_driver
 
-    def M(self):
+    def M(self) -> np.ndarray:
         # Mass-weighting matrix
         return np.diag(np.concatenate([np.diag(bead.M) for bead in self.beads]))
             
-    def Minv(self):
+    def Minv(self) -> np.ndarray:
         # Inverse mass-weighting matrix
         return np.diag(np.concatenate([np.diag(bead.Minv) for bead in self.beads]))
 
-    def U(self, ref_E=0.0):
+    def U(self, ref_E=0.0) -> float:
         # Half ring polymer potential
         out = 0.0
         for b, bead in enumerate(self.beads): # Sum from 1 to N
@@ -50,7 +50,7 @@ class RingPolymer():
             out += Vharm
         return out
 
-    def gradient(self):
+    def gradient(self) -> np.ndarray:
         # Gradient of half ring polymer
         prefactor = 1.0 / (self.betaN**2 * hbar**2)
         # Number of coords in mol
@@ -72,13 +72,13 @@ class RingPolymer():
             big_grad[bi*lmol:(bi+1)*lmol] = (bead.masses * lil_grad) + bead_grad
         return big_grad
     
-    def spring_subhess(self):
+    def spring_subhess(self) -> np.ndarray:
         # Hessians of spring terms between adjacent beads
         A = np.eye(len(self.beads[0]))
         A *= self.beads[0].masses / (self.betaN**2 * hbar**2)
         return A
 
-    def hessian(self):
+    def hessian(self) -> np.ndarray:
         # Hessian of half ring polymer
         lmol = len(self.beads[0])
         #A = np.eye(len(self.beads[0]))
@@ -106,17 +106,17 @@ class RingPolymer():
                 bigHess[dend:post_dend, dstart:dend] -= A
         return bigHess
 
-    def full_U(self, ref_E=0.0):
+    def full_U(self, ref_E=0.0) -> float:
         # Full ring polymer potential
         return 2.0 * self.U(ref_E=ref_E)
     
-    def full_gradient(self):
+    def full_gradient(self) -> np.ndarray:
         # Gradient of full ring polymer
         # Structured as Bead_0, Bead_1, ..., Bead_N/2-1, Bead_0, Bead_1, ..., Bead_N/2-1
         half_grad = self.gradient()
         return np.hstack((half_grad, half_grad))
 
-    def full_hessian(self):
+    def full_hessian(self) -> np.ndarray:
         # Hessian of full ring polymer
         # Structured as Bead_0, Bead_1, ..., Bead_N/2-1, Bead_0, Bead_1, ..., Bead_N/2-1
         lmol = len(self.beads[0])
@@ -131,13 +131,13 @@ class RingPolymer():
         off_diag[-lmol:,-lmol:] -= A
         return np.block([[half_Hess, off_diag],[off_diag, half_Hess]])
 
-    def mw_full_hess(self):
+    def mw_full_hess(self) -> np.ndarray:
         # Mass-weighting matrix for full ring polymer Hessian
         fh = self.full_hessian()
         Mweight = np.diag(np.tile(np.diag(self.Minv()), 2))
         return Mweight @ fh @ Mweight
 
-    def evaluate_all_beads(self, der_lvl=1, update_hess=False):
+    def evaluate_all_beads(self, der_lvl=1, update_hess=False) -> None:
         """
             For each bead, evaluate request features.
             Always evaluate energy of beads.
@@ -151,7 +151,9 @@ class RingPolymer():
         if der_lvl < 0 or der_lvl > 2:
             raise ValueError("Derivative level (der_lvl) needs to be 0, 1, or 2!")
         loading_bar_length = len(self.beads)
-        print("="*loading_bar_length)
+        print("\tEvaluating beads")
+        print("\t"+"="*loading_bar_length)
+        print("\t", end="", flush=True)
         for bi, bead in enumerate(self.beads):
             # If a bead already has a value for a quantity, skip computing
             if not bead.has_V:
@@ -172,7 +174,7 @@ class RingPolymer():
             print("*", end="", flush=True)
         print("")
 
-    def double_beads(self):
+    def double_beads(self) -> None:
         # For each bead pair, add another in the middle by interpolating attributes
         n = np.arange(len(self.beads))
         ref_mol = self.beads[0].mol
@@ -195,7 +197,7 @@ class RingPolymer():
         self.N = len(self.beads) * 2
         self.betaN = self.beta / self.N
 
-    def align_beads(self):
+    def align_beads(self) -> None:
         # Align the structures of the beads by translation and rotation
         for b in range(1,len(self.beads)):
             if self.beads[b].has_data:
@@ -203,14 +205,14 @@ class RingPolymer():
             self.beads[b].mol = self.beads[b].mol.align(
                 self.beads[b-1].mol, atoms_map=True)[0].geometry
             
-    def com(self):
+    def com(self) -> np.ndarray:
         # Center of mass of ring polymer
         out = np.zeros(3)
         for bead in self.beads:
             out += np.sum(np.diag(bead.mol.masses) @ bead.mol.geometry, axis=0)
         return out / (self.N * np.sum(self.beads[0].mol.masses))
 
-    def moit(self):
+    def moit(self) -> np.ndarray:
         # Moment of inertia tensor for ring polymer
         c = self.com()
         I = np.zeros((3,3))

@@ -19,3 +19,5 @@ freq_to_hartree = np.sqrt((5.48579909065 * (10 ** (-4)))) # WTF is this number
 
 ref_mass = 1.0 #/ au_to_amu
 
+# Time
+time_au_to_s = qcel.constants.get("atomic unit of time")
