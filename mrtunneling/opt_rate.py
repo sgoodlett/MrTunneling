@@ -9,8 +9,8 @@ def optimize_rate(instanton:Instanton, reactant:FakeRingPolymer,
     print("Running rate optimization routine:")
     k_conv = 1e-4
     k_max_steps = 10
-    print(f"\t{"k_conv":20s} = {k_conv:5.2e}")
-    print(f"\t{"k_max_steps":20s} = {k_max_steps:5d}")
+    print(f"\t{'k_conv':20s} = {k_conv:5.2e}")
+    print(f"\t{'k_max_steps':20s} = {k_max_steps:5d}")
     working_dir = f"k_opt_{len(instanton.beads)}/"
     instanton.optimize(opt_plan, working_dir)
     instanton.evaluate_all_beads(der_lvl=2)

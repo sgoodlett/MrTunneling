@@ -12,8 +12,7 @@ readme = "README.md"
 authors = [
     { name = "Stephen M. Goodlett", email = "stephen.goodlett25@gmail.com" }
 ]
-license = "MIT"
-license-files = ["LICENSE"]
+license = {file = "LICENSE"}
 # See https://pypi.org/classifiers/
 classifiers = [
     "Programming Language :: Python :: 3",
