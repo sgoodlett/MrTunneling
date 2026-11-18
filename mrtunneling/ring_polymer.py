@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.interpolate import CubicSpline
-from .constants import kb, hbar, ref_mass
+from .constants import kb, hbar, ref_mass, au_to_amu
 from .task_driver import TaskDriver
 from .bead import Bead
 
@@ -205,28 +205,33 @@ class RingPolymer():
             self.beads[b].mol = self.beads[b].mol.align(
                 self.beads[b-1].mol, atoms_map=True)[0].geometry
             
+    def atom_masses(self) -> np.ndarray:
+        # Atomic masses in m_e (atomic units), shape (natoms,)
+        return np.asarray(self.beads[0].mol.masses) / au_to_amu
+
+    def full_ring_geometries(self) -> list[np.ndarray]:
+        # Geometries of all N beads of the full ring polymer.
+        # The half ring polymer stores beads 1 to N/2; beads N/2+1 to N are the
+        # same structures traversed in reverse.
+        geoms = [bead.mol.geometry for bead in self.beads]
+        return geoms + geoms[::-1]
+
     def com(self) -> np.ndarray:
-        # Center of mass of ring polymer
-        out = np.zeros(3)
-        for bead in self.beads:
-            out += np.sum(np.diag(bead.mol.masses) @ bead.mol.geometry, axis=0)
-        return out / (self.N * np.sum(self.beads[0].mol.masses))
+        # Center of mass of the full ring polymer
+        m = self.atom_masses()
+        geoms = self.full_ring_geometries()
+        out = np.sum([m @ g for g in geoms], axis=0)
+        return out / (len(geoms) * np.sum(m))
 
     def moit(self) -> np.ndarray:
-        # Moment of inertia tensor for ring polymer
+        # Moment of inertia tensor of the full ring polymer (all N beads) about
+        # its common center of mass, in m_e * bohr^2
         c = self.com()
+        m = self.atom_masses()
         I = np.zeros((3,3))
-        for bead in self.beads:
-            for i in range(3):
-                # i + 1 mod 3 and i + 2 mod 3 essentially give not i
-                I[i,i] += np.sum(bead.mol.masses * 
-                                 ( (bead.mol.geometry[:,(i+1)%3] - c[(i+1)%3])**2 
-                                 + (bead.mol.geometry[:,(i+2)%3] - c[(i+1)%3])**2))
-                for j in range(i+1,3):
-                    I[i,j] += -1.0 * np.sum(bead.mol.masses
-                        * (bead.mol.geometry[:,i] - c[i])
-                        * (bead.mol.geometry[:,j] - c[j]))
-                    I[j,i] = I[i,j]
+        for g in self.full_ring_geometries():
+            r = g - c
+            I += np.sum(m * np.sum(r*r, axis=1)) * np.eye(3) - (r.T * m) @ r
         return I
 
 

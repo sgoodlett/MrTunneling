@@ -5,7 +5,7 @@ from .ring_polymer import RingPolymer
 # I have no clue if any of these work...
 
 def trans_pfxn(ring_polymer:RingPolymer) -> float:
-    M = np.sum(ring_polymer.beads[0].mol.masses)
+    M = np.sum(ring_polymer.atom_masses()) # total molecular mass in m_e
     out = ((ring_polymer.N*M) / (2*np.pi*ring_polymer.betaN*hbar**2))**(3.0/2.0)
     out /= ring_polymer.N**3
     return out
@@ -45,10 +45,21 @@ def vib_pfxn_R(ring_polymer:RingPolymer, n_ignore=6) -> float:
 def vib_pfxn_inst(ring_polymer:RingPolymer) -> float:
     etas = analyze_hessian(ring_polymer)
     beads = ring_polymer.beads
-    BN = np.sum([beads[0].masses * (beads[i].x - beads[i-1].x)**2 for i in range(1, len(beads))])
-    out = np.prod([1.0/(ring_polymer.betaN * hbar * np.abs(eta)) for eta in etas])
-    out *= np.sqrt(2*np.pi*BN / (ring_polymer.betaN * hbar**2))
-    out *= ring_polymer.N**7
+    # B_N sums over all N springs of the full ring polymer. The half ring polymer
+    # holds N/2 - 1 springs; each appears twice in the full ring, and the two
+    # springs joining the halves have zero length.
+    BN = 2.0 * np.sum([beads[0].masses * (beads[i].x - beads[i-1].x)**2 for i in range(1, len(beads))])
+    log_out = 0.0
+    #out = np.prod([1.0/(ring_polymer.betaN * hbar * np.abs(eta)) for eta in etas])
+    for eta in etas:
+        log_out += np.log((ring_polymer.betaN * hbar * eta)**-1)
+        #print("tt ", eta, out)
+    Bbb = np.sqrt(2*np.pi*BN / (ring_polymer.betaN * hbar**2))
+    #out *= Bbb
+    Ccc = ring_polymer.N**7
+    #out *= Ccc
+    print("min etas, max etas, BN, out1, Bbb, Ccc: ", np.min(etas), np.max(etas), BN, log_out, Bbb, np.log(Ccc))
+    out = np.exp(log_out + np.log(Bbb) + np.log(Ccc))
     return out
 
 def classical_rate(ts_rp:RingPolymer, r_rp:RingPolymer) -> float:

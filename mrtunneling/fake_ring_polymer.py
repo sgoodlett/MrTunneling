@@ -4,6 +4,10 @@ from .bead import Bead
 from .ring_polymer import RingPolymer
 
 class FakeRingPolymer(RingPolymer):
+    """
+        Collapsed ring polymer: all N beads sit at the same structure (e.g. a
+        reactant or transition state), with N taken from a reference ring polymer.
+    """
     def __init__(self, refRingPolymer:RingPolymer, bead:Bead) -> None:
         self.beads = [bead] # Bead 1 to N/2, indexed minus 1 bc Python
         self.N = len(refRingPolymer.beads) * 2
@@ -16,24 +20,20 @@ class FakeRingPolymer(RingPolymer):
         self.N = N 
         self.betaN = self.beta / self.N
 
+    def full_ring_geometries(self) -> list[np.ndarray]:
+        # All N beads are at the same structure
+        return [self.beads[0].mol.geometry] * self.N
+
     def com(self) -> np.ndarray:
-        out = np.zeros(3)
-        bead = self.beads[0]
-        out += np.sum(np.diag(bead.mol.masses) @ bead.mol.geometry, axis=0)
-        return out / (self.N * np.sum(self.beads[0].mol.masses))
+        # Center of mass (same for one bead or the full collapsed ring polymer)
+        m = self.atom_masses()
+        return m @ self.beads[0].mol.geometry / np.sum(m)
 
     def moit(self) -> np.ndarray:
+        # Moment of inertia tensor of the full collapsed ring polymer:
+        # N times that of a single bead, in m_e * bohr^2
         c = self.com()
-        I = np.zeros((3,3))
-        bead = self.beads[0]
-        for i in range(3):
-            # i + 1 mod 3 and i + 2 mod 3 essentially give not i
-            I[i,i] += np.sum(bead.mol.masses * 
-                             ( (bead.mol.geometry[:,(i+1)%3] - c[(i+1)%3])**2 
-                             + (bead.mol.geometry[:,(i+2)%3] - c[(i+1)%3])**2))
-            for j in range(i+1,3):
-                I[i,j] += -1.0 * np.sum(bead.mol.masses
-                    * (bead.mol.geometry[:,i] - c[i])
-                    * (bead.mol.geometry[:,j] - c[j]))
-                I[j,i] = I[i,j]
+        m = self.atom_masses()
+        r = self.beads[0].mol.geometry - c
+        I = np.sum(m * np.sum(r*r, axis=1)) * np.eye(3) - (r.T * m) @ r
         return I * self.N
