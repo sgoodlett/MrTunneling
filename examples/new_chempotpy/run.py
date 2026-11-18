@@ -90,4 +90,3 @@ tsRP = mrtunneling.fake_ring_polymer.FakeRingPolymer(I, ts_bead)
 
 k = mrtunneling.partition_functions.kappa(I, tsRP)
 print(k)
-
